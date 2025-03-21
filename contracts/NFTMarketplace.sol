@@ -35,6 +35,7 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         address buyer,
         uint256 price
     );
+    event NFTListingCancelled(uint256 tokenId, address seller);
 
     constructor(
         address initialOwner
@@ -97,6 +98,176 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
         approve(address(this), tokenId);
         emit NFTListed(tokenId, msg.sender, price);
+    }
+
+    /**
+     * @dev Allows the owner to cancel a listing
+     * @param tokenId The ID of the NFT to cancel
+     */
+    function cancelListing(uint256 tokenId) public {
+        require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
+        require(_listings[tokenId].isActive, "NFT is not listed");
+
+        _listings[tokenId].isActive = false;
+        emit NFTListingCancelled(tokenId, msg.sender);
+    }
+
+    /**
+     * @dev Allows anyone to buy an NFT
+     * @param tokenId The ID of the NFT to buy
+     */
+    function buyNFT(uint256 tokenId) public payable nonReentrant {
+        Listing memory listing = _listings[tokenId];
+        require(listing.isActive, "NFT is not listed for sale");
+        require(msg.value >= listing.price, "Insufficient funds");
+
+        _listings[tokenId].isActive = false;
+
+        uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
+            10000;
+        uint256 sellerProceeds = listing.price - marketplaceFee;
+
+        _transfer(listing.seller, msg.sender, tokenId);
+
+        payable(listing.seller).transfer(sellerProceeds);
+
+        if (msg.value > listing.price) {
+            payable(msg.sender).transfer(msg.value - listing.price);
+        }
+
+        emit NFTSold(tokenId, listing.seller, msg.sender, listing.price);
+    }
+
+    /**
+     * @dev Fetches the details of an NFT listing
+     * @param tokenId The ID of the NFT
+     * @return seller The address of the seller
+     * @return price The price of the NFT
+     * @return isActive Whether the listing is active
+     */
+    function getListing(
+        uint256 tokenId
+    ) public view returns (address seller, uint256 price, bool isActive) {
+        Listing memory listing = _listings[tokenId];
+        return (listing.seller, listing.price, listing.isActive);
+    }
+
+    /**
+     * @dev Fetches all active listings (paginated)
+     * @param skip The number of listings to skip
+     * @param take The number of listings to fetch
+     * @return tokenIds The IDs of the NFTs listed for sale
+     * @return sellers The addresses of the sellers
+     * @return prices The prices of the NFTs
+     */
+    function getAllListings(
+        uint256 skip,
+        uint256 take
+    )
+        public
+        view
+        returns (
+            uint256[] memory tokenIds,
+            address[] memory sellers,
+            uint256[] memory prices
+        )
+    {
+        uint256 totalActive = 0;
+        for (uint256 i = 0; i < _nextTokenId; i++) {
+            if (_listings[i].isActive) {
+                totalActive++;
+            }
+        }
+
+        uint256 resultCount = take;
+        if (skip >= totalActive) {
+            resultCount = 0;
+        } else if (skip + take > totalActive) {
+            resultCount = totalActive - skip;
+        }
+
+        tokenIds = new uint256[](resultCount);
+        sellers = new address[](resultCount);
+        prices = new uint256[](resultCount);
+
+        uint256 resultIndex = 0;
+        uint256 skipped = 0;
+
+        for (
+            uint256 i = 0;
+            i < _nextTokenId && resultIndex < resultCount;
+            i++
+        ) {
+            if (_listings[i].isActive) {
+                if (skipped < skip) {
+                    skipped++;
+                    continue;
+                }
+
+                tokenIds[resultIndex] = i;
+                sellers[resultIndex] = _listings[i].seller;
+                prices[resultIndex] = _listings[i].price;
+                resultIndex++;
+            }
+        }
+
+        return (tokenIds, sellers, prices);
+    }
+
+    /**
+     * @dev Fetches all NFTs owned by an address
+     * @param seller The address of the owner
+     * @return tokenIds The IDs of the NFTs owned by the address
+     * @return prices The prices of the NFTs
+     */
+    function getListingsBySeller(
+        address seller
+    ) public view returns (uint256[] memory tokenIds, uint256[] memory prices) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < _nextTokenId; i++) {
+            if (_listings[i].isActive && _listings[i].seller == seller) {
+                count++;
+            }
+        }
+
+        tokenIds = new uint256[](count);
+        prices = new uint256[](count);
+
+        uint256 resultIndex = 0;
+        for (uint256 i = 0; i < _nextTokenId && resultIndex < count; i++) {
+            if (_listings[i].isActive && _listings[i].seller == seller) {
+                tokenIds[resultIndex] = i;
+                prices[resultIndex] = _listings[i].price;
+                resultIndex++;
+            }
+        }
+
+        return (tokenIds, prices);
+    }
+
+    /**
+     * @dev Fetches all NFTs owned by an address
+     * @param owner The address of the owner
+     * @return Array of token IDs owned by the address
+     */
+
+    function getNFTsByOwner(
+        address owner
+    ) public view returns (uint256[] memory) {
+        uint256 count = balanceOf(owner);
+
+        uint256[] memory tokenIds = new uint256[](count);
+
+        uint256 resultIndex = 0;
+
+        for (uint256 i = 0; i < _nextTokenId && resultIndex < count; i++) {
+            if (_ownerOf(i) == owner) {
+                tokenIds[resultIndex] = i;
+                resultIndex++;
+            }
+        }
+
+        return tokenIds;
     }
 
     /**
