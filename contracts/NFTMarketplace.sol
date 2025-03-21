@@ -36,6 +36,8 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 price
     );
     event NFTListingCancelled(uint256 tokenId, address seller);
+    event MarketplaceFeeUpdated(uint256 oldFee, uint256 newFee);
+    event MintFeeUpdated(uint256 oldFee, uint256 newFee);
 
     constructor(
         address initialOwner
@@ -74,9 +76,11 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         address to,
         string memory uri
     ) public onlyOwner returns (uint256) {
+        require(to != address(0), "Invalid recipient address");
         uint256 tokenId = _nextTokenId++;
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
+        emit NFTMinted(tokenId, to, uri);
         return tokenId;
     }
 
@@ -85,7 +89,7 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
      * @param tokenId The ID of the NFT to list
      * @param price The price in wei
      */
-    function listNFT(uint256 tokenId, uint256 price) public {
+    function listNFT(uint256 tokenId, uint256 price) public nonReentrant {
         require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
         require(price > 0, "Price should be greater than 0");
         require(!_listings[tokenId].isActive, "NFT is already listed");
@@ -120,6 +124,10 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         Listing memory listing = _listings[tokenId];
         require(listing.isActive, "NFT is not listed for sale");
         require(msg.value >= listing.price, "Insufficient funds");
+        require(
+            _ownerOf(tokenId) == listing.seller,
+            "NFT is no longer owned by the seller"
+        );
 
         _listings[tokenId].isActive = false;
 
@@ -250,7 +258,6 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
      * @param owner The address of the owner
      * @return Array of token IDs owned by the address
      */
-
     function getNFTsByOwner(
         address owner
     ) public view returns (uint256[] memory) {
@@ -271,12 +278,35 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Fetches sender's listings
+     * @return tokenIds The IDs of the NFTs listed by the sender
+     * @return prices The prices of the NFTs
+     */
+    function getMyListings()
+        public
+        view
+        returns (uint256[] memory tokenIds, uint256[] memory prices)
+    {
+        return getListingsBySeller(msg.sender);
+    }
+
+    /**
+     * @dev Fetches sender's NFTs
+     * @return Array of token IDs owned by the sender
+     */
+    function getMyNFTs() public view returns (uint256[] memory) {
+        return getNFTsByOwner(msg.sender);
+    }
+
+    /**
      * @dev Owner can adjust the marketplace fee
      * @param newMarketplaceFee The new fee percentage in basis points (1/10000)
      */
     function setMarketplaceFee(uint256 newMarketplaceFee) public onlyOwner {
         require(newMarketplaceFee < 1000, "Fee should be less than 10%");
+        uint256 oldFee = marketplaceFeePercentage;
         marketplaceFeePercentage = newMarketplaceFee;
+        emit MarketplaceFeeUpdated(oldFee, newMarketplaceFee);
     }
 
     /**
@@ -292,7 +322,9 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
      * @param newMintFee New fee amount in wei
      */
     function setMintFee(uint256 newMintFee) public onlyOwner {
+        uint256 oldFee = mintFee;
         mintFee = newMintFee;
+        emit MintFeeUpdated(oldFee, newMintFee);
     }
 
     /**
