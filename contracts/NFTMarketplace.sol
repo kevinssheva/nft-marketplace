@@ -35,6 +35,7 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         address buyer,
         uint256 price
     );
+    event NFTListingUpdated(uint256 tokenId, address seller, uint256 newPrice);
     event NFTListingCancelled(uint256 tokenId, address seller);
     event MarketplaceFeeUpdated(uint256 oldFee, uint256 newFee);
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
@@ -102,6 +103,20 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
         approve(address(this), tokenId);
         emit NFTListed(tokenId, msg.sender, price);
+    }
+
+    /**
+     * @dev Allows the owner to update the price of a listed NFT
+     * @param tokenId The ID of the NFT to update
+     * @param newPrice The new price in wei
+     */
+    function updateListingPrice(uint256 tokenId, uint256 newPrice) public {
+        require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
+        require(_listings[tokenId].isActive, "NFT is not listed");
+        require(newPrice > 0, "Price should be greater than 0");
+
+        _listings[tokenId].price = newPrice;
+        emit NFTListingUpdated(tokenId, msg.sender, newPrice);
     }
 
     /**
