@@ -33,7 +33,7 @@ const NFTCard = ({
   const [imageError, setImageError] = useState(false);
 
   return (
-    <div className="bg-card rounded-xl overflow-hidden border border-border/40 shadow-sm hover:shadow-md transition-shadow duration-300">
+    <div className="bg-card rounded-xl overflow-hidden border border-white/20 transition-shadow duration-300 bg-surface">
       {/* NFT Image */}
       <div className="relative aspect-square">
         {isLoading && !imageError && (
@@ -92,7 +92,7 @@ const NFTCard = ({
           <div className="flex justify-between items-center mb-3">
             <div className="flex items-center">
               <FaEthereum className="text-primary mr-1" />
-              <span className="font-medium">{price}</span>
+              <span className="font-medium text-text">{price}</span>
             </div>
             {isListed && <span className="text-xs text-text/60">Listed</span>}
           </div>
@@ -102,7 +102,7 @@ const NFTCard = ({
         <div className="flex gap-2 mt-2">
           <Link
             href={`/nft/${id}`}
-            className="flex-1 px-3 py-2 text-center bg-background hover:bg-background/80 border border-border text-text rounded-lg text-sm transition-colors"
+            className="flex-1 px-3 py-2 text-center bg-background hover:bg-background/80 border border-primary text-primary rounded-lg text-sm transition-colors"
           >
             View Details
           </Link>
@@ -110,7 +110,7 @@ const NFTCard = ({
           {isListed && !isOwned && price && (
             <button
               onClick={onBuyClick}
-              className="flex-1 px-3 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm transition-colors"
+              className="flex-1 px-3 py-2 cursor-pointer bg-primary hover:bg-primary/90 text-white rounded-lg text-sm transition-colors"
             >
               Buy Now
             </button>
