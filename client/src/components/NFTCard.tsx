@@ -12,7 +12,7 @@ interface NFTCardProps {
   price?: string;
   creator: {
     address: string;
-    name?: string;
+    name?: string | null;
   };
   isOwned?: boolean;
   isListed?: boolean;
