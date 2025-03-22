@@ -2,7 +2,7 @@ import ConnectWalletButton from '@/components/ConnectWalletButton';
 
 export default function Home() {
   return (
-    <div>
+    <div className="">
       <ConnectWalletButton />
     </div>
   );

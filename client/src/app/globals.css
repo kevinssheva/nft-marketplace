@@ -1,1 +1,12 @@
 @import 'tailwindcss';
+
+@theme static {
+  --color-primary: #8b5cf6; /* purple-500 */
+  --color-primary-hover: #7c3aed; /* purple-600 */
+  --color-background: #0a0a0a; /* near-black */
+  --color-surface: #1a1a1a; /* dark surface */
+  --color-text: #f4f4f5; /* soft white */
+  --color-muted: #a1a1aa; /* gray-400 */
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+}
