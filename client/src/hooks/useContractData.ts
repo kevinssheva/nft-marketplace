@@ -3,7 +3,18 @@ import {
   ContractService,
   createContractService,
 } from '@/services/ContractService';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+// First, let's define the ListingData type that's missing
+export interface ListingData {
+  id: string;
+  name: string;
+  image: string;
+  price: string;
+  creator: string;
+  isOwned: boolean;
+  isListed: boolean;
+}
 
 export function useContractData() {
   const { provider, signer, isConnected } = useWallet();
@@ -12,27 +23,6 @@ export function useContractData() {
   const [listings, setListings] = useState<ListingData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // useEffect(() => {
-  //   console.log('Wallet connection state:', {
-  //     isConnected,
-  //     hasProvider: !!provider,
-  //     hasSigner: !!signer,
-  //     hasContractService: !!contractService,
-  //   });
-
-  //   // Check if we're on the right network
-  //   if (provider) {
-  //     provider
-  //       .getNetwork()
-  //       .then((network) => {
-  //         console.log('Connected to network:', network.name, network.chainId);
-  //       })
-  //       .catch((err) => {
-  //         console.error('Failed to get network:', err);
-  //       });
-  //   }
-  // }, [isConnected, provider, signer, contractService]);
 
   useEffect(() => {
     if (provider && isConnected) {
@@ -43,47 +33,54 @@ export function useContractData() {
     }
   }, [provider, signer, isConnected]);
 
-  const fetchListings = async (skip = 0, take = 10) => {
-    if (!contractService) {
-      setError('Wallet not connected');
-      return;
-    }
+  // Use useCallback to memoize the function reference
+  const fetchListings = useCallback(
+    async (skip = 0, take = 10) => {
+      if (!contractService) {
+        setError('Wallet not connected');
+        return;
+      }
 
-    setIsLoading(true);
-    setError(null);
+      setIsLoading(true);
+      setError(null);
 
-    try {
-      contractService.testConnection();
-      const data = await contractService.getAllListings(skip, take);
-      setListings(data);
-    } catch (err) {
-      console.error('Error fetching listings', err);
-      setError('Error fetching listings');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      try {
+        const data = await contractService.getAllListings(skip, take);
+        setListings(data);
+      } catch (err) {
+        console.error('Error fetching listings', err);
+        setError('Error fetching listings');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [contractService]
+  );
 
-  const buyNFT = async (tokenId: string, price: string) => {
-    if (!contractService) {
-      setError('Wallet not connected');
-      return;
-    }
+  const buyNFT = useCallback(
+    async (tokenId: string, price: string) => {
+      if (!contractService) {
+        setError('Wallet not connected');
+        return false;
+      }
 
-    setIsLoading(true);
-    setError(null);
+      setIsLoading(true);
+      setError(null);
 
-    try {
-      await contractService.buyNFT(tokenId, price);
-      await fetchListings();
-    } catch (err) {
-      console.error('Error buying NFT', err);
-      setError('Failed to buy NFT');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      try {
+        await contractService.buyNFT(tokenId, price);
+        await fetchListings();
+        return true;
+      } catch (err) {
+        console.error('Error buying NFT', err);
+        setError('Failed to buy NFT');
+        return false;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [contractService, fetchListings]
+  );
 
   return {
     listings,

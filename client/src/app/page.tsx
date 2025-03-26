@@ -7,7 +7,8 @@ import { useEffect } from 'react';
 
 export default function Home() {
   const { isConnected } = useWallet();
-  const { listings, isLoading, error, fetchListings } = useContractData();
+  const { listings, isLoading, error, fetchListings, buyNFT } =
+    useContractData();
 
   useEffect(() => {
     if (!isConnected) return;
@@ -45,10 +46,13 @@ export default function Home() {
                   name={nft.name}
                   image={nft.image}
                   price={nft.price}
-                  creator={nft.creator}
+                  creator={{
+                    address: nft.creator,
+                    name: 'Creator',
+                  }}
                   isOwned={nft.isOwned}
                   isListed={nft.isListed}
-                  onBuyClick={() => {}}
+                  onBuyClick={() => buyNFT(nft.id, nft.price)}
                 />
               ))}
             </div>
