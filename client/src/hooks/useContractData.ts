@@ -89,7 +89,7 @@ export function useContractData() {
   );
 
   const mintNFT = useCallback(
-    async (metadata: NFTMetadata, mintFee: string) => {
+    async (metadataUri: string, mintFee: string) => {
       if (!contractService) {
         setError('Wallet not connected');
         return { success: false };
@@ -99,26 +99,14 @@ export function useContractData() {
       setError(null);
 
       try {
-        // In a real app, you would upload to IPFS or another storage service first
-        // For simplicity, we're assuming the metadata.image is already an IPFS URI or similar
-        
-        // Create a JSON metadata URI
-        const metadataUri = JSON.stringify({
-          name: metadata.name,
-          description: metadata.description,
-          image: metadata.image,
-        });
-        
-        // Call the mint function on the contract
         const result = await contractService.mintNFT(metadataUri, mintFee);
-        
         // Refresh listings after minting
         await fetchListings();
-        
+
         return {
           success: true,
           tokenId: result.tokenId,
-          txHash: result.txHash
+          txHash: result.txHash,
         };
       } catch (err: unknown) {
         if (err instanceof Error) {

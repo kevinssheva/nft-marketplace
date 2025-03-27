@@ -3,15 +3,22 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/context/WalletContext';
-import { useContractData } from '@/hooks/useContractData';
+import { NFTMetadata, useContractData } from '@/hooks/useContractData';
 import Image from 'next/image';
 import { IoMdClose } from 'react-icons/io';
 import { IoImageOutline } from 'react-icons/io5';
+import { useIPFS } from '@/hooks/useIPFS';
 
 export default function MintNFT() {
   const router = useRouter();
   const { isConnected } = useWallet();
   const { mintNFT, isLoading, error } = useContractData();
+  const {
+    isLoading: isUploading,
+    error: uploadError,
+    uploadFile,
+    uploadMetadata,
+  } = useIPFS();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -22,6 +29,7 @@ export default function MintNFT() {
   >('idle');
   const mintFee = '0.1'; // Mint fee in ETH
   const [mintTxHash, setMintTxHash] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Clear preview when file is removed
   useEffect(() => {
@@ -65,26 +73,38 @@ export default function MintNFT() {
     try {
       // Start uploading metadata
       setMintStatus('uploading');
+      setUploadProgress(20);
 
-      // Mock IPFS upload - in a real app, you'd upload to IPFS or another storage service
-      // For this example, I'm creating a local object URL as a placeholder
-      await new Promise((resolve) => setTimeout(resolve, 1500)); // Simulate upload delay
+      // Upload image to IPFS
+      const imageUri = await uploadFile(file);
+      if (!imageUri) {
+        throw new Error('Failed to upload image');
+      }
+      setUploadProgress(50);
 
       // Create metadata object
-      const metadata = {
+      const metadata: NFTMetadata = {
         name,
         description,
-        image: previewUrl || '', // In a real app, this would be an IPFS URI
+        image: imageUri,
       };
+
+      // Upload metadata to IPFS
+      const metadataUri = await uploadMetadata(metadata);
+      if (!metadataUri) {
+        throw new Error('Failed to upload metadata');
+      }
+      setUploadProgress(80);
 
       setMintStatus('minting');
 
-      // Call the mintNFT function from your hook
-      const result = await mintNFT(metadata, mintFee);
+      // Call the mintNFT function from your hook with the IPFS metadata URI
+      const result = await mintNFT(metadataUri, mintFee);
 
       if (result && result.success) {
         setMintStatus('success');
         setMintTxHash(result.txHash || null);
+        setUploadProgress(100);
 
         // Reset form after successful mint
         setTimeout(() => {
@@ -92,10 +112,12 @@ export default function MintNFT() {
         }, 3000);
       } else {
         setMintStatus('error');
+        setUploadProgress(0);
       }
     } catch (err) {
       console.error('Error minting NFT:', err);
       setMintStatus('error');
+      setUploadProgress(0);
     }
   };
 
@@ -141,7 +163,7 @@ export default function MintNFT() {
                     </button>
                   </div>
                 ) : (
-                  <div className="text-cente flex items-center flex-col">
+                  <div className="text-center flex items-center flex-col">
                     <IoImageOutline className="w-12 h-12 text-primary" />
                     <p className="mt-1 text-sm text-text">
                       Drag and drop an image, or click to select
@@ -199,6 +221,7 @@ export default function MintNFT() {
               type="submit"
               disabled={
                 isLoading ||
+                isUploading ||
                 mintStatus === 'uploading' ||
                 mintStatus === 'minting'
               }
@@ -213,6 +236,26 @@ export default function MintNFT() {
                 <span className="ml-2 inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               )}
             </button>
+
+            {/* Progress Bar (for uploading and minting) */}
+            {(mintStatus === 'uploading' || mintStatus === 'minting') && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm text-text">
+                  <span>
+                    {mintStatus === 'uploading'
+                      ? 'Uploading to IPFS...'
+                      : 'Minting on blockchain...'}
+                  </span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full bg-primary/20 rounded-full h-2.5">
+                  <div
+                    className="bg-primary h-2.5 rounded-full transition-all duration-500"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
 
             {/* Success/Error Messages */}
             {mintStatus === 'success' && (
@@ -234,10 +277,12 @@ export default function MintNFT() {
               </div>
             )}
 
-            {(mintStatus === 'error' || error) && (
+            {(mintStatus === 'error' || error || uploadError) && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-500 p-4 rounded-lg">
                 <p className="font-medium">Error minting NFT</p>
-                <p className="text-sm mt-1">{error || 'Please try again'}</p>
+                <p className="text-sm mt-1">
+                  {error || uploadError || 'Please try again'}
+                </p>
               </div>
             )}
           </form>
