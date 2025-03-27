@@ -5,28 +5,12 @@ import {
 } from '@/services/ContractService';
 import { useCallback, useEffect, useState } from 'react';
 
-// First, let's define the ListingData type that's missing
-export interface ListingData {
-  id: string;
-  name: string;
-  image: string;
-  price: string;
-  creator: string;
-  isOwned: boolean;
-  isListed: boolean;
-}
-
-export interface NFTMetadata {
-  name: string;
-  description: string;
-  image: string;
-}
-
 export function useContractData() {
   const { provider, signer, isConnected } = useWallet();
   const [contractService, setContractService] =
     useState<ContractService | null>(null);
-  const [listings, setListings] = useState<ListingData[]>([]);
+  const [listings, setListings] = useState<NFTDataType[]>([]);
+  const [ownedNFTs, setOwnedNFTs] = useState<NFTDataType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,11 +108,58 @@ export function useContractData() {
     [contractService, fetchListings]
   );
 
+  const fetchMyNFTs = useCallback(async () => {
+    if (!contractService) {
+      setError('Wallet not connected');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await contractService.getMyNFTs();
+      setOwnedNFTs(data);
+    } catch (err) {
+      console.error('Error fetching owned NFTs', err);
+      setError('Error fetching owned NFTs');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [contractService]);
+
+  const listNFT = useCallback(
+    async (tokenId: string, price: string) => {
+      if (!contractService) {
+        setError('Wallet not connected');
+        return false;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        await contractService.listNFT(tokenId, price);
+        await fetchMyNFTs();
+        await fetchListings();
+      } catch (err) {
+        console.error('Error listing NFT', err);
+        setError('Failed to list NFT');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [contractService, fetchListings, fetchMyNFTs]
+  );
+
   return {
     listings,
+    ownedNFTs,
     isLoading,
     error,
     fetchListings,
+    fetchMyNFTs,
+    listNFT,
     buyNFT,
     mintNFT,
   };

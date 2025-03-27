@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/context/WalletContext';
-import { NFTMetadata, useContractData } from '@/hooks/useContractData';
+import { useContractData } from '@/hooks/useContractData';
 import Image from 'next/image';
 import { IoMdClose } from 'react-icons/io';
 import { IoImageOutline } from 'react-icons/io5';
@@ -83,7 +83,7 @@ export default function MintNFT() {
       setUploadProgress(50);
 
       // Create metadata object
-      const metadata: NFTMetadata = {
+      const metadata: NFTMetadataType = {
         name,
         description,
         image: imageUri,

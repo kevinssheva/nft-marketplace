@@ -9,7 +9,7 @@ export default function Home() {
   const { isConnected } = useWallet();
   const { listings, isLoading, error, fetchListings, buyNFT } =
     useContractData();
-
+  console.log('listings', listings);
   useEffect(() => {
     if (!isConnected) return;
     fetchListings(0, 12);
@@ -46,13 +46,10 @@ export default function Home() {
                   name={nft.name}
                   image={nft.image}
                   price={nft.price}
-                  creator={{
-                    address: nft.creator,
-                    name: 'Creator',
-                  }}
+                  creator={nft.creator}
                   isOwned={nft.isOwned}
                   isListed={nft.isListed}
-                  onBuyClick={() => buyNFT(nft.id, nft.price)}
+                  onBuyClick={() => buyNFT(nft.id, nft.price ? nft.price : '0')}
                 />
               ))}
             </div>

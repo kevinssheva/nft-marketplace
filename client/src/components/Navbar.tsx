@@ -31,19 +31,13 @@ const Navbar = () => {
               Home
             </Link>
             <Link
-              href="/explore"
+              href="/mint"
               className="text-text hover:text-primary font-medium"
             >
-              Explore
+              Mint
             </Link>
             <Link
-              href="/create"
-              className="text-text hover:text-primary font-medium"
-            >
-              Create
-            </Link>
-            <Link
-              href="/my-nfts"
+              href="/profile"
               className="text-text hover:text-primary font-medium"
             >
               My NFTs
@@ -81,19 +75,13 @@ const Navbar = () => {
                 Home
               </Link>
               <Link
-                href="/explore"
+                href="/mint"
                 className="text-text hover:text-primary font-medium"
               >
-                Explore
+                Mint
               </Link>
               <Link
-                href="/create"
-                className="text-text hover:text-primary font-medium"
-              >
-                Create
-              </Link>
-              <Link
-                href="/my-nfts"
+                href="/profile"
                 className="text-text hover:text-primary font-medium"
               >
                 My NFTs

@@ -1,4 +1,3 @@
-import { NFTMetadata } from '@/hooks/useContractData';
 import { pinata } from '@/utils/config';
 
 export class IPFSService {
@@ -29,7 +28,7 @@ export class IPFSService {
     }
   }
 
-  async uploadMetadata(metadata: NFTMetadata): Promise<string> {
+  async uploadMetadata(metadata: NFTMetadataType): Promise<string> {
     try {
       const signedUrl = await this.getSignedUrl();
       const upload = await pinata.upload.public.json(metadata).url(signedUrl);
@@ -52,9 +51,9 @@ export class IPFSService {
       pinata.config?.pinataGateway || 'https://gateway.pinata.cloud/ipfs/';
 
     if (ipfsUri.startsWith('ipfs://')) {
-      return `${gatewayUrl}${ipfsUri.replace('ipfs://', '')}`;
+      return `${gatewayUrl}/ipfs/${ipfsUri.replace('ipfs://', '')}`;
     }
 
-    return gatewayUrl + ipfsUri;
+    return gatewayUrl + '/ipfs/' + ipfsUri;
   }
 }

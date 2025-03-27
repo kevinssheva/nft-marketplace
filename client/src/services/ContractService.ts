@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import NFTMarketplaceABI from '../abi/NFTMarketplace.json';
+import { IPFSService } from './IPFSService';
 
 const NFT_MARKETPLACE_ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
 
@@ -7,6 +8,7 @@ export class ContractService {
   private contract: ethers.Contract | null = null;
   private provider: ethers.BrowserProvider | null = null;
   private signer: ethers.JsonRpcSigner | null = null;
+  private ipfsService: IPFSService;
 
   constructor(
     provider?: ethers.BrowserProvider,
@@ -14,6 +16,7 @@ export class ContractService {
   ) {
     if (provider) this.setProvider(provider);
     if (signer) this.setSigner(signer);
+    this.ipfsService = new IPFSService();
   }
 
   setProvider(provider: ethers.BrowserProvider) {
@@ -42,37 +45,44 @@ export class ContractService {
   async getAllListings(skip = 0, take = 10) {
     if (!this.contract) throw new Error('Contract not initialized');
 
-    // console.log('Fetching listings', skip, take);
-    // console.log('Using contract at:', NFT_MARKETPLACE_ADDRESS);
-
     try {
-      // console.log('Calling getAllListings with:', skip, take);
       const [tokenIds, sellers, prices] = await this.contract.getAllListings(
         skip,
         take
       );
 
-      // console.log('Got listings result:', tokenIds);
-
       const listings = await Promise.all(
         tokenIds.map(async (tokenId: bigint, index: number) => {
           const tokenURI = await this.contract!.tokenURI(tokenId);
-          let metadata = { name: `NFT #${tokenId.toString()}`, image: '' };
+          let metadata: NFTMetadataType = {
+            name: `NFT #${tokenId.toString()}`,
+            description: '',
+            image: '',
+          };
 
           try {
-            if (tokenURI.startsWith('ipfs://')) {
-              const ipfsHash = tokenURI.replace('ipfs://', '');
-              const response = await fetch(`https://ipfs.io/ipfs/${ipfsHash}`);
-              metadata = await response.json();
-            } else {
-              const response = await fetch(tokenURI);
-              metadata = await response.json();
+            // Use the IPFS service to get gateway URL for metadata
+            const metadataUrl = this.ipfsService.getGatewayUrl(tokenURI);
+            const response = await fetch(metadataUrl);
+            metadata = await response.json();
+
+            // Process image URL to use IPFS gateway if needed
+            if (metadata.image && metadata.image.startsWith('ipfs://')) {
+              metadata.image = this.ipfsService.getGatewayUrl(metadata.image);
             }
           } catch (error) {
             console.error(
               `Failed to fetch metadata for token #${tokenId}`,
               error
             );
+          }
+
+          // Check if the current user owns this NFT
+          let isOwned = false;
+          if (this.signer) {
+            const signerAddress = await this.signer.getAddress();
+            const tokenOwner = await this.contract!.ownerOf(tokenId);
+            isOwned = tokenOwner.toLowerCase() === signerAddress.toLowerCase();
           }
 
           return {
@@ -84,6 +94,7 @@ export class ContractService {
               address: sellers[index],
               name: null,
             },
+            isOwned,
             isListed: true,
           };
         })
@@ -134,6 +145,80 @@ export class ContractService {
     const tokenId = mintEvent ? mintEvent.args?.tokenId.toString() : '0';
 
     return { tokenId, txHash: receipt.transactionHash };
+  }
+
+  async getMyNFTs() {
+    if (!this.contract || !this.signer)
+      throw new Error('Contract or signer not initialized');
+
+    try {
+      const tokenIds = await this.contract.getMyNFTs();
+
+      const nfts = await Promise.all(
+        tokenIds.map(async (tokenId: bigint) => {
+          const tokenURI = await this.contract!.tokenURI(tokenId);
+          let metadata: NFTMetadataType = {
+            name: `NFT #${tokenId.toString()}`,
+            description: '',
+            image: '',
+          };
+
+          const [seller, price, isListed] = await this.contract!.getListing(
+            tokenId
+          );
+
+          try {
+            const metadataUrl = this.ipfsService.getGatewayUrl(tokenURI);
+            // console.log('Fetching metadata from:', metadataUrl);
+            const response = await fetch(metadataUrl);
+
+            metadata = await response.json();
+
+            if (metadata.image && metadata.image.startsWith('ipfs://')) {
+              metadata.image = this.ipfsService.getGatewayUrl(metadata.image);
+            }
+          } catch (error) {
+            console.error(
+              `Failed to fetch metadata for token #${tokenId}`,
+              error
+            );
+          }
+
+          return {
+            id: tokenId.toString(),
+            name: metadata.name,
+            description: metadata.description,
+            image: metadata.image,
+            price: isListed ? ethers.formatEther(price) : '0',
+            creator: {
+              address: seller,
+              name: null,
+            },
+            isListed,
+          };
+        })
+      );
+
+      return nfts;
+    } catch (error) {
+      console.error('Failed to fetch NFTs', error);
+      throw error;
+    }
+  }
+
+  async listNFT(tokenId: string, price: string) {
+    if (!this.contract || !this.signer) {
+      throw new Error('Contract or signer not initialized');
+    }
+
+    try {
+      const priceInWei = ethers.parseEther(price);
+      const tx = await this.contract.listNFT(tokenId, priceInWei);
+      return await tx.wait();
+    } catch (error) {
+      console.error('Failed to list NFT', error);
+      throw error;
+    }
   }
 
   async testConnection() {
