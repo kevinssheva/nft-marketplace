@@ -16,6 +16,12 @@ export interface ListingData {
   isListed: boolean;
 }
 
+export interface NFTMetadata {
+  name: string;
+  description: string;
+  image: string;
+}
+
 export function useContractData() {
   const { provider, signer, isConnected } = useWallet();
   const [contractService, setContractService] =
@@ -82,11 +88,60 @@ export function useContractData() {
     [contractService, fetchListings]
   );
 
+  const mintNFT = useCallback(
+    async (metadata: NFTMetadata, mintFee: string) => {
+      if (!contractService) {
+        setError('Wallet not connected');
+        return { success: false };
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // In a real app, you would upload to IPFS or another storage service first
+        // For simplicity, we're assuming the metadata.image is already an IPFS URI or similar
+        
+        // Create a JSON metadata URI
+        const metadataUri = JSON.stringify({
+          name: metadata.name,
+          description: metadata.description,
+          image: metadata.image,
+        });
+        
+        // Call the mint function on the contract
+        const result = await contractService.mintNFT(metadataUri, mintFee);
+        
+        // Refresh listings after minting
+        await fetchListings();
+        
+        return {
+          success: true,
+          tokenId: result.tokenId,
+          txHash: result.txHash
+        };
+      } catch (err: unknown) {
+        if (err instanceof Error) {
+          console.error('Error minting NFT', err);
+          setError(err.message || 'Failed to mint NFT');
+        } else {
+          console.error('Unexpected error', err);
+          setError('Failed to mint NFT');
+        }
+        return { success: false };
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [contractService, fetchListings]
+  );
+
   return {
     listings,
     isLoading,
     error,
     fetchListings,
     buyNFT,
+    mintNFT,
   };
 }

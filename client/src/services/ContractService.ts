@@ -112,6 +112,30 @@ export class ContractService {
     }
   }
 
+  async mintNFT(
+    metadata: string,
+    mintFeeEth: string
+  ): Promise<{ tokenId: string; txHash: string }> {
+    if (!this.contract || !this.signer)
+      throw new Error('Contract or signer not initialized');
+
+    const mintFeeWei = ethers.parseEther(mintFeeEth);
+
+    const tx = await this.contract.mint(metadata, {
+      value: mintFeeWei,
+    });
+
+    const receipt = await tx.wait();
+
+    const mintEvent = receipt.events?.find(
+      (event: { event: string }) => event.event === 'NFTMinted'
+    );
+
+    const tokenId = mintEvent ? mintEvent.args?.tokenId.toString() : '0';
+
+    return { tokenId, txHash: receipt.transactionHash };
+  }
+
   async testConnection() {
     try {
       console.log('Testing connection to contract...');
