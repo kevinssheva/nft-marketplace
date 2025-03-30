@@ -5,8 +5,16 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC721URIStorage} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
+contract NFTMarketplace is
+    ERC721,
+    ERC721URIStorage,
+    Ownable,
+    ReentrancyGuard,
+    IERC2981
+{
     uint256 private _nextTokenId;
 
     // Fee for selling NFT
@@ -21,7 +29,14 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         bool isActive;
     }
 
+    struct RoyaltyInfo {
+        address receiver;
+        uint256 royaltyPercentage;
+    }
+
     mapping(uint256 => Listing) private _listings;
+
+    mapping(uint256 => RoyaltyInfo) private _royalties;
 
     event NFTMinted(
         uint256 indexed tokenId,
@@ -45,18 +60,42 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
     ) ERC721("NFTMarketplace", "NMP") Ownable(initialOwner) {}
 
     /**
+    * @dev Sets the royalty information for a specific token
+    * @param tokenId The ID of the token
+    * @param receiver The address to receive royalties
+    * @param royaltyPercentage The percentage of royalties (in basis points)
+     */
+    function _setTokenRoyalty(
+        uint256 tokenId,
+        address receiver,
+        uint256 royaltyPercentage
+    ) internal {
+        _royalties[tokenId] = RoyaltyInfo({
+            receiver: receiver,
+            royaltyPercentage: royaltyPercentage
+        });
+    }
+
+    /**
      * @dev Allows anyone to mint an NFT by paying a mint fee
      * @param uri Metadata URI for the NFT
+     * @param royaltyReceiver Address to receive royalties
+     * @param royaltyPercentage Percentage of royalties (in basis points)
      * @return tokenId The ID of the newly minted NFT
      */
     function mint(
-        string memory uri
+        string memory uri,
+        address royaltyReceiver,
+        uint256 royaltyPercentage
     ) public payable nonReentrant returns (uint256) {
         require(msg.value >= mintFee, "Insufficient mint fee");
+        require(royaltyPercentage <= 1000, "Royalty cannot exceed 10%");
+        require(royaltyReceiver != address(0), "Invalid royalty receiver");
 
         uint256 tokenId = _nextTokenId++;
         _safeMint(msg.sender, tokenId);
         _setTokenURI(tokenId, uri);
+        _setTokenRoyalty(tokenId, royaltyReceiver, royaltyPercentage);
 
         // Refund excess payment if any
         if (msg.value > mintFee) {
@@ -148,9 +187,19 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
         uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
             10000;
-        uint256 sellerProceeds = listing.price - marketplaceFee;
+        
+        (address receiver, uint256 royaltyAmount) = this.royaltyInfo(
+            tokenId,
+            listing.price
+        );
+
+        uint256 sellerProceeds = listing.price - marketplaceFee - royaltyAmount;
 
         _transfer(listing.seller, msg.sender, tokenId);
+
+        if (royaltyAmount > 0 && receiver != address(0)) {
+            payable(receiver).transfer(royaltyAmount);
+        }
 
         payable(listing.seller).transfer(sellerProceeds);
 
@@ -351,6 +400,15 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
         payable(owner()).transfer(balance);
     }
 
+    function royaltyInfo(
+        uint256 tokenId,
+        uint256 salePrice
+    ) external view override returns (address receiver, uint256 royaltyAmount) {
+        RoyaltyInfo memory royalty = _royalties[tokenId];
+        royaltyAmount = (salePrice * royalty.royaltyPercentage) / 10000;
+        return (royalty.receiver, royaltyAmount);
+    }
+
     // The following functions are overrides required by Solidity.
     function tokenURI(
         uint256 tokenId
@@ -360,7 +418,7 @@ contract NFTMarketplace is ERC721, ERC721URIStorage, Ownable, ReentrancyGuard {
 
     function supportsInterface(
         bytes4 interfaceId
-    ) public view override(ERC721, ERC721URIStorage) returns (bool) {
+    ) public view override(ERC721, ERC721URIStorage, IERC165) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }
