@@ -38,6 +38,9 @@ contract NFTMarketplace is
 
     mapping(uint256 => RoyaltyInfo) private _royalties;
 
+    uint256[] private _activeListingIds;
+    mapping(uint256 => uint256) private _activeListingIndex;
+
     event NFTMinted(
         uint256 indexed tokenId,
         address indexed creator,
@@ -60,10 +63,10 @@ contract NFTMarketplace is
     ) ERC721("NFTMarketplace", "NMP") Ownable(initialOwner) {}
 
     /**
-    * @dev Sets the royalty information for a specific token
-    * @param tokenId The ID of the token
-    * @param receiver The address to receive royalties
-    * @param royaltyPercentage The percentage of royalties (in basis points)
+     * @dev Sets the royalty information for a specific token
+     * @param tokenId The ID of the token
+     * @param receiver The address to receive royalties
+     * @param royaltyPercentage The percentage of royalties (in basis points)
      */
     function _setTokenRoyalty(
         uint256 tokenId,
@@ -74,6 +77,24 @@ contract NFTMarketplace is
             receiver: receiver,
             royaltyPercentage: royaltyPercentage
         });
+    }
+
+    /**
+     * @dev Removes listing from the active listings
+     * @param tokenId The ID of the token
+     */
+    function _removeActiveListing(uint256 tokenId) private {
+        uint256 lastListingIndex = _activeListingIds.length - 1;
+        uint256 listingIndex = _activeListingIndex[tokenId];
+
+        if (listingIndex != lastListingIndex) {
+            uint256 lastTokenId = _activeListingIds[lastListingIndex];
+            _activeListingIndex[lastTokenId] = listingIndex;
+            _activeListingIds[listingIndex] = lastTokenId;
+        }
+
+        _activeListingIds.pop();
+        delete _activeListingIndex[tokenId];
     }
 
     /**
@@ -140,6 +161,9 @@ contract NFTMarketplace is
             isActive: true
         });
 
+        _activeListingIds.push(tokenId);
+        _activeListingIndex[tokenId] = _activeListingIds.length - 1;
+
         approve(address(this), tokenId);
         emit NFTListed(tokenId, msg.sender, price);
     }
@@ -167,6 +191,9 @@ contract NFTMarketplace is
         require(_listings[tokenId].isActive, "NFT is not listed");
 
         _listings[tokenId].isActive = false;
+        _removeActiveListing(tokenId);
+        approve(address(0), tokenId);
+
         emit NFTListingCancelled(tokenId, msg.sender);
     }
 
@@ -184,10 +211,11 @@ contract NFTMarketplace is
         );
 
         _listings[tokenId].isActive = false;
+        _removeActiveListing(tokenId);
 
         uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
             10000;
-        
+
         (address receiver, uint256 royaltyAmount) = this.royaltyInfo(
             tokenId,
             listing.price
@@ -244,12 +272,7 @@ contract NFTMarketplace is
             uint256[] memory prices
         )
     {
-        uint256 totalActive = 0;
-        for (uint256 i = 0; i < _nextTokenId; i++) {
-            if (_listings[i].isActive) {
-                totalActive++;
-            }
-        }
+        uint256 totalActive = _activeListingIds.length;
 
         uint256 resultCount = take;
         if (skip >= totalActive) {
@@ -262,25 +285,11 @@ contract NFTMarketplace is
         sellers = new address[](resultCount);
         prices = new uint256[](resultCount);
 
-        uint256 resultIndex = 0;
-        uint256 skipped = 0;
-
-        for (
-            uint256 i = 0;
-            i < _nextTokenId && resultIndex < resultCount;
-            i++
-        ) {
-            if (_listings[i].isActive) {
-                if (skipped < skip) {
-                    skipped++;
-                    continue;
-                }
-
-                tokenIds[resultIndex] = i;
-                sellers[resultIndex] = _listings[i].seller;
-                prices[resultIndex] = _listings[i].price;
-                resultIndex++;
-            }
+        for (uint256 i = 0; i < resultCount; i++) {
+            uint256 tokenId = _activeListingIds[skip + i];
+            tokenIds[i] = tokenId;
+            sellers[i] = _listings[tokenId].seller;
+            prices[i] = _listings[tokenId].price;
         }
 
         return (tokenIds, sellers, prices);
@@ -296,8 +305,9 @@ contract NFTMarketplace is
         address seller
     ) public view returns (uint256[] memory tokenIds, uint256[] memory prices) {
         uint256 count = 0;
-        for (uint256 i = 0; i < _nextTokenId; i++) {
-            if (_listings[i].isActive && _listings[i].seller == seller) {
+        for (uint256 i = 0; i < _activeListingIds.length; i++) {
+            uint256 tokenId = _activeListingIds[i];
+            if (_listings[tokenId].seller == seller) {
                 count++;
             }
         }
@@ -306,10 +316,11 @@ contract NFTMarketplace is
         prices = new uint256[](count);
 
         uint256 resultIndex = 0;
-        for (uint256 i = 0; i < _nextTokenId && resultIndex < count; i++) {
-            if (_listings[i].isActive && _listings[i].seller == seller) {
-                tokenIds[resultIndex] = i;
-                prices[resultIndex] = _listings[i].price;
+        for (uint256 i = 0; i < _activeListingIds.length; i++) {
+            uint256 tokenId = _activeListingIds[i];
+            if (_listings[tokenId].seller == seller) {
+                tokenIds[resultIndex] = tokenId;
+                prices[resultIndex] = _listings[tokenId].price;
                 resultIndex++;
             }
         }
