@@ -30,8 +30,9 @@ contract NFTMarketplace is
     }
 
     struct RoyaltyInfo {
-        address receiver;
-        uint256 royaltyPercentage;
+        address artistAddress;
+        uint256 salesRoyaltyPercentage;
+        uint256 ownerListenPercentage;
     }
 
     mapping(uint256 => Listing) private _listings;
@@ -58,6 +59,14 @@ contract NFTMarketplace is
     event MarketplaceFeeUpdated(uint256 oldFee, uint256 newFee);
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
 
+    event ListenRecorded(
+        uint256 indexed tokenId,
+        address indexed listener,
+        uint256 totalAmount,
+        uint256 ownerShare,
+        uint256 artistShare
+    );
+
     constructor(
         address initialOwner
     ) ERC721("NFTMarketplace", "NMP") Ownable(initialOwner) {}
@@ -65,17 +74,20 @@ contract NFTMarketplace is
     /**
      * @dev Sets the royalty information for a specific token
      * @param tokenId The ID of the token
-     * @param receiver The address to receive royalties
-     * @param royaltyPercentage The percentage of royalties (in basis points)
+     * @param artistAddress The address to receive royalties
+     * @param salesRoyaltyPercentage The percentage of royalties (in basis points)
+     * @param ownerListenPercentage The percentage of royalties for listening (in basis points)
      */
     function _setTokenRoyalty(
         uint256 tokenId,
-        address receiver,
-        uint256 royaltyPercentage
+        address artistAddress,
+        uint256 salesRoyaltyPercentage,
+        uint256 ownerListenPercentage
     ) internal {
         _royalties[tokenId] = RoyaltyInfo({
-            receiver: receiver,
-            royaltyPercentage: royaltyPercentage
+            artistAddress: artistAddress,
+            salesRoyaltyPercentage: salesRoyaltyPercentage,
+            ownerListenPercentage: ownerListenPercentage
         });
     }
 
@@ -100,23 +112,37 @@ contract NFTMarketplace is
     /**
      * @dev Allows anyone to mint an NFT by paying a mint fee
      * @param uri Metadata URI for the NFT
-     * @param royaltyReceiver Address to receive royalties
-     * @param royaltyPercentage Percentage of royalties (in basis points)
+     * @param artistAddress Address to receive royalties
+     * @param salesRoyaltyPercentage Percentage of royalties (in basis points)
+     * @param ownerListenPercentage Percentage of royalties for listening (in basis points)
      * @return tokenId The ID of the newly minted NFT
      */
     function mint(
         string memory uri,
-        address royaltyReceiver,
-        uint256 royaltyPercentage
+        address artistAddress,
+        uint256 salesRoyaltyPercentage,
+        uint256 ownerListenPercentage
     ) public payable nonReentrant returns (uint256) {
         require(msg.value >= mintFee, "Insufficient mint fee");
-        require(royaltyPercentage <= 1000, "Royalty cannot exceed 10%");
-        require(royaltyReceiver != address(0), "Invalid royalty receiver");
+        require(
+            salesRoyaltyPercentage <= 1000,
+            "Sales royalty cannot exceed 10%"
+        );
+        require(
+            ownerListenPercentage <= 5000,
+            "Owner listen share cannot exceed 50%"
+        );
+        require(artistAddress != address(0), "Invalid artist address");
 
         uint256 tokenId = _nextTokenId++;
         _safeMint(msg.sender, tokenId);
         _setTokenURI(tokenId, uri);
-        _setTokenRoyalty(tokenId, royaltyReceiver, royaltyPercentage);
+        _setTokenRoyalty(
+            tokenId,
+            artistAddress,
+            salesRoyaltyPercentage,
+            ownerListenPercentage
+        );
 
         // Refund excess payment if any
         if (msg.value > mintFee) {
@@ -216,26 +242,62 @@ contract NFTMarketplace is
         uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
             10000;
 
-        (address receiver, uint256 royaltyAmount) = this.royaltyInfo(
-            tokenId,
-            listing.price
-        );
+        RoyaltyInfo memory royalty = _royalties[tokenId];
+        uint256 artistRoyalty = (listing.price *
+            royalty.salesRoyaltyPercentage) / 10000;
 
-        uint256 sellerProceeds = listing.price - marketplaceFee - royaltyAmount;
+        uint256 sellerProceeds = listing.price - marketplaceFee - artistRoyalty;
 
         _transfer(listing.seller, msg.sender, tokenId);
 
-        if (royaltyAmount > 0 && receiver != address(0)) {
-            payable(receiver).transfer(royaltyAmount);
+        if (artistRoyalty > 0 && royalty.artistAddress != address(0)) {
+            payable(royalty.artistAddress).transfer(artistRoyalty);
         }
 
+        // Pay seller
         payable(listing.seller).transfer(sellerProceeds);
 
+        // Refund excess payment
         if (msg.value > listing.price) {
             payable(msg.sender).transfer(msg.value - listing.price);
         }
 
         emit NFTSold(tokenId, listing.seller, msg.sender, listing.price);
+    }
+
+    /**
+     * @dev Processes payment for listening to an NFT
+     * @param tokenId The ID of the NFT
+     */
+    function recordListen(uint256 tokenId) public payable nonReentrant {
+        RoyaltyInfo memory royalty = _royalties[tokenId];
+        address currentOwner = ownerOf(tokenId);
+        require(msg.value > 0, "Payment required for listening");
+
+        // Calculate owner's share for listening
+        uint256 ownerShare = (msg.value * royalty.ownerListenPercentage) /
+            10000;
+
+        // Remaining goes to the artist
+        uint256 artistShare = msg.value - ownerShare;
+
+        // Pay the current owner their share
+        if (ownerShare > 0 && currentOwner != address(0)) {
+            payable(currentOwner).transfer(ownerShare);
+        }
+
+        // Pay the artist their share
+        if (artistShare > 0 && royalty.artistAddress != address(0)) {
+            payable(royalty.artistAddress).transfer(artistShare);
+        }
+
+        emit ListenRecorded(
+            tokenId,
+            msg.sender,
+            msg.value,
+            ownerShare,
+            artistShare
+        );
     }
 
     /**
@@ -416,8 +478,8 @@ contract NFTMarketplace is
         uint256 salePrice
     ) external view override returns (address receiver, uint256 royaltyAmount) {
         RoyaltyInfo memory royalty = _royalties[tokenId];
-        royaltyAmount = (salePrice * royalty.royaltyPercentage) / 10000;
-        return (royalty.receiver, royaltyAmount);
+        royaltyAmount = (salePrice * royalty.salesRoyaltyPercentage) / 10000;
+        return (royalty.artistAddress, royaltyAmount);
     }
 
     // The following functions are overrides required by Solidity.
