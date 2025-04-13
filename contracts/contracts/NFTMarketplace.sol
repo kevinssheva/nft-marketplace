@@ -39,6 +39,8 @@ contract NFTMarketplace is
 
     mapping(uint256 => RoyaltyInfo) private _royalties;
 
+    mapping(address => uint256) private _pendingRoyalties;
+
     uint256[] private _activeListingIds;
     mapping(uint256 => uint256) private _activeListingIndex;
 
@@ -62,10 +64,19 @@ contract NFTMarketplace is
     event ListenRecorded(
         uint256 indexed tokenId,
         address indexed listener,
-        uint256 totalAmount,
-        uint256 ownerShare,
-        uint256 artistShare
+        uint256 amount,
+        address owner,
+        address artist
     );
+
+    event RoyaltiesDistributed(
+        uint256 timestamp,
+        uint256 totalArtistRoyalties,
+        uint256 totalOwnerRoyalties,
+        uint256 recipientCount
+    );
+
+    event RoyaltyWithdrawn(address indexed recipient, uint256 amount);
 
     constructor(
         address initialOwner
@@ -251,11 +262,13 @@ contract NFTMarketplace is
         _transfer(listing.seller, msg.sender, tokenId);
 
         if (artistRoyalty > 0 && royalty.artistAddress != address(0)) {
-            payable(royalty.artistAddress).transfer(artistRoyalty);
+            _pendingRoyalties[royalty.artistAddress] += artistRoyalty;
         }
 
         // Pay seller
-        payable(listing.seller).transfer(sellerProceeds);
+        if (sellerProceeds > 0) {
+            _pendingRoyalties[listing.seller] += sellerProceeds;
+        }
 
         // Refund excess payment
         if (msg.value > listing.price) {
@@ -266,7 +279,7 @@ contract NFTMarketplace is
     }
 
     /**
-     * @dev Processes payment for listening to an NFT
+     * @dev Records a listen event but accumulates royalties for monthly distribution
      * @param tokenId The ID of the NFT
      */
     function recordListen(uint256 tokenId) public payable nonReentrant {
@@ -281,23 +294,82 @@ contract NFTMarketplace is
         // Remaining goes to the artist
         uint256 artistShare = msg.value - ownerShare;
 
-        // Pay the current owner their share
+        // Accumulate royalties instead of immediately transferring
         if (ownerShare > 0 && currentOwner != address(0)) {
-            payable(currentOwner).transfer(ownerShare);
+            _pendingRoyalties[currentOwner] += ownerShare;
         }
 
-        // Pay the artist their share
         if (artistShare > 0 && royalty.artistAddress != address(0)) {
-            payable(royalty.artistAddress).transfer(artistShare);
+            _pendingRoyalties[royalty.artistAddress] += artistShare;
         }
 
         emit ListenRecorded(
             tokenId,
             msg.sender,
             msg.value,
-            ownerShare,
-            artistShare
+            currentOwner,
+            royalty.artistAddress
         );
+    }
+
+    /**
+     * @dev Records multiple listen events in a single transaction
+     * @param tokenIds Array of NFT token IDs
+     * @param amounts Array of payment amounts for each listen
+     */
+    function recordBatchListens(
+        uint256[] calldata tokenIds,
+        uint256[] calldata amounts
+    ) public payable nonReentrant {
+        require(tokenIds.length > 0, "Empty token array");
+        require(tokenIds.length == amounts.length, "Array length mismatch");
+
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            totalAmount += amounts[i];
+        }
+        require(
+            msg.value >= totalAmount,
+            "Insufficient payment for batch listens"
+        );
+
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+            uint256 amount = amounts[i];
+
+            require(amount > 0, "Payment required for listening");
+            RoyaltyInfo memory royalty = _royalties[tokenId];
+            address currentOwner = ownerOf(tokenId);
+
+            // Calculate owner's share for listening
+            uint256 ownerShare = (amount * royalty.ownerListenPercentage) /
+                10000;
+
+            // Remaining goes to the artist
+            uint256 artistShare = amount - ownerShare;
+
+            // Accumulate royalties instead of immediately transferring
+            if (ownerShare > 0 && currentOwner != address(0)) {
+                _pendingRoyalties[currentOwner] += ownerShare;
+            }
+
+            if (artistShare > 0 && royalty.artistAddress != address(0)) {
+                _pendingRoyalties[royalty.artistAddress] += artistShare;
+            }
+
+            emit ListenRecorded(
+                tokenId,
+                msg.sender,
+                amount,
+                currentOwner,
+                royalty.artistAddress
+            );
+        }
+
+        // Refund excess payment if any
+        if (msg.value > totalAmount) {
+            payable(msg.sender).transfer(msg.value - totalAmount);
+        }
     }
 
     /**
@@ -471,6 +543,16 @@ contract NFTMarketplace is
         uint256 balance = address(this).balance;
         require(balance > 0, "No fees to withdraw");
         payable(owner()).transfer(balance);
+    }
+
+    function withdrawRoyalties() public nonReentrant {
+        uint256 amount = _pendingRoyalties[msg.sender];
+        require(amount > 0, "No royalties to withdraw");
+
+        _pendingRoyalties[msg.sender] = 0;
+        payable(msg.sender).transfer(amount);
+
+        emit RoyaltyWithdrawn(msg.sender, amount);
     }
 
     function royaltyInfo(
