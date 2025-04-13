@@ -39,6 +39,7 @@ contract NFTMarketplace is
 
     mapping(uint256 => RoyaltyInfo) private _royalties;
 
+    uint256 private _accumulatedPlatformFees;
     mapping(address => uint256) private _pendingRoyalties;
 
     uint256[] private _activeListingIds;
@@ -60,6 +61,8 @@ contract NFTMarketplace is
     event NFTListingCancelled(uint256 tokenId, address seller);
     event MarketplaceFeeUpdated(uint256 oldFee, uint256 newFee);
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
+
+    event FeesWithdrawn(address indexed owner, uint256 amount);
 
     event ListenRecorded(
         uint256 indexed tokenId,
@@ -154,6 +157,8 @@ contract NFTMarketplace is
             salesRoyaltyPercentage,
             ownerListenPercentage
         );
+
+        _accumulatedPlatformFees += mintFee;
 
         // Refund excess payment if any
         if (msg.value > mintFee) {
@@ -252,6 +257,8 @@ contract NFTMarketplace is
 
         uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
             10000;
+
+        _accumulatedPlatformFees += marketplaceFee;
 
         RoyaltyInfo memory royalty = _royalties[tokenId];
         uint256 artistRoyalty = (listing.price *
@@ -540,9 +547,15 @@ contract NFTMarketplace is
      * @dev Owner can withdraw accumulated fees
      */
     function withdrawFees() public onlyOwner {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "No fees to withdraw");
-        payable(owner()).transfer(balance);
+        uint256 amount = _accumulatedPlatformFees;
+        require(amount > 0, "No fees to withdraw");
+
+        // Reset the accumulated fees
+        _accumulatedPlatformFees = 0;
+
+        payable(owner()).transfer(amount);
+
+        emit FeesWithdrawn(owner(), amount);
     }
 
     function withdrawRoyalties() public nonReentrant {
@@ -562,6 +575,16 @@ contract NFTMarketplace is
         RoyaltyInfo memory royalty = _royalties[tokenId];
         royaltyAmount = (salePrice * royalty.salesRoyaltyPercentage) / 10000;
         return (royalty.artistAddress, royaltyAmount);
+    }
+
+    // Add getter for platform fees
+    function getAccumulatedPlatformFees() external view returns (uint256) {
+        return _accumulatedPlatformFees;
+    }
+
+    // Update getTotalPendingRoyalties to exclude platform fees
+    function getTotalPendingRoyalties() external view returns (uint256) {
+        return address(this).balance - _accumulatedPlatformFees;
     }
 
     // The following functions are overrides required by Solidity.
