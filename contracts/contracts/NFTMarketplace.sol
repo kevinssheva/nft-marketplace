@@ -145,7 +145,7 @@ contract NFTMarketplace is
      * @param uri Metadata URI for the NFT
      * @return tokenId The ID of the newly minted NFT
      */
-    function safeMint(
+    function ownerMint(
         address to,
         string memory uri
     ) public onlyOwner returns (uint256) {
