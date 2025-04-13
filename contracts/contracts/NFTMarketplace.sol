@@ -8,6 +8,10 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
+/**
+ * @title NFTMarketplace
+ * @dev A marketplace for minting, listing, and trading NFTs with royalty support
+ */
 contract NFTMarketplace is
     ERC721,
     ERC721URIStorage,
@@ -15,14 +19,32 @@ contract NFTMarketplace is
     ReentrancyGuard,
     IERC2981
 {
+    // ================ CUSTOM ERRORS ================
+    error InsufficientMintFee();
+    error RoyaltyTooHigh();
+    error InvalidAddress();
+    error NotTokenOwner();
+    error InvalidPrice();
+    error AlreadyListed();
+    error NotListed();
+    error NoLongerOwnedBySeller();
+    error InsufficientFunds();
+    error NoFeesToWithdraw();
+    error NoRoyaltiesToWithdraw();
+    error FeeTooHigh();
+    error EmptyTokenArray();
+    error ArrayLengthMismatch();
+    error InsufficientBatchPayment();
+
+    // ================ STATE VARIABLES ================
     uint256 private _nextTokenId;
 
-    // Fee for selling NFT
+    // Fee structure
     uint256 public marketplaceFeePercentage = 250; // 2.5%
-
-    // Fee for minting NFT
     uint256 public mintFee = 0.01 ether;
+    uint256 private _accumulatedPlatformFees;
 
+    // ================ DATA STRUCTURES ================
     struct Listing {
         address seller;
         uint256 price;
@@ -35,16 +57,16 @@ contract NFTMarketplace is
         uint256 ownerListenPercentage;
     }
 
+    // ================ MAPPINGS ================
     mapping(uint256 => Listing) private _listings;
-
     mapping(uint256 => RoyaltyInfo) private _royalties;
-
-    uint256 private _accumulatedPlatformFees;
     mapping(address => uint256) private _pendingRoyalties;
 
+    // Active listings storage
     uint256[] private _activeListingIds;
     mapping(uint256 => uint256) private _activeListingIndex;
 
+    // ================ EVENTS ================
     event NFTMinted(
         uint256 indexed tokenId,
         address indexed creator,
@@ -61,9 +83,7 @@ contract NFTMarketplace is
     event NFTListingCancelled(uint256 tokenId, address seller);
     event MarketplaceFeeUpdated(uint256 oldFee, uint256 newFee);
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
-
     event FeesWithdrawn(address indexed owner, uint256 amount);
-
     event ListenRecorded(
         uint256 indexed tokenId,
         address indexed listener,
@@ -71,58 +91,14 @@ contract NFTMarketplace is
         address owner,
         address artist
     );
-
-    event RoyaltiesDistributed(
-        uint256 timestamp,
-        uint256 totalArtistRoyalties,
-        uint256 totalOwnerRoyalties,
-        uint256 recipientCount
-    );
-
     event RoyaltyWithdrawn(address indexed recipient, uint256 amount);
 
+    // ================ CONSTRUCTOR ================
     constructor(
         address initialOwner
     ) ERC721("NFTMarketplace", "NMP") Ownable(initialOwner) {}
 
-    /**
-     * @dev Sets the royalty information for a specific token
-     * @param tokenId The ID of the token
-     * @param artistAddress The address to receive royalties
-     * @param salesRoyaltyPercentage The percentage of royalties (in basis points)
-     * @param ownerListenPercentage The percentage of royalties for listening (in basis points)
-     */
-    function _setTokenRoyalty(
-        uint256 tokenId,
-        address artistAddress,
-        uint256 salesRoyaltyPercentage,
-        uint256 ownerListenPercentage
-    ) internal {
-        _royalties[tokenId] = RoyaltyInfo({
-            artistAddress: artistAddress,
-            salesRoyaltyPercentage: salesRoyaltyPercentage,
-            ownerListenPercentage: ownerListenPercentage
-        });
-    }
-
-    /**
-     * @dev Removes listing from the active listings
-     * @param tokenId The ID of the token
-     */
-    function _removeActiveListing(uint256 tokenId) private {
-        uint256 lastListingIndex = _activeListingIds.length - 1;
-        uint256 listingIndex = _activeListingIndex[tokenId];
-
-        if (listingIndex != lastListingIndex) {
-            uint256 lastTokenId = _activeListingIds[lastListingIndex];
-            _activeListingIndex[lastTokenId] = listingIndex;
-            _activeListingIds[listingIndex] = lastTokenId;
-        }
-
-        _activeListingIds.pop();
-        delete _activeListingIndex[tokenId];
-    }
-
+    // ================ CORE NFT FUNCTIONS ================
     /**
      * @dev Allows anyone to mint an NFT by paying a mint fee
      * @param uri Metadata URI for the NFT
@@ -137,16 +113,10 @@ contract NFTMarketplace is
         uint256 salesRoyaltyPercentage,
         uint256 ownerListenPercentage
     ) public payable nonReentrant returns (uint256) {
-        require(msg.value >= mintFee, "Insufficient mint fee");
-        require(
-            salesRoyaltyPercentage <= 1000,
-            "Sales royalty cannot exceed 10%"
-        );
-        require(
-            ownerListenPercentage <= 5000,
-            "Owner listen share cannot exceed 50%"
-        );
-        require(artistAddress != address(0), "Invalid artist address");
+        if (msg.value < mintFee) revert InsufficientMintFee();
+        if (salesRoyaltyPercentage > 1000) revert RoyaltyTooHigh();
+        if (ownerListenPercentage > 5000) revert RoyaltyTooHigh();
+        if (artistAddress == address(0)) revert InvalidAddress();
 
         uint256 tokenId = _nextTokenId++;
         _safeMint(msg.sender, tokenId);
@@ -179,7 +149,7 @@ contract NFTMarketplace is
         address to,
         string memory uri
     ) public onlyOwner returns (uint256) {
-        require(to != address(0), "Invalid recipient address");
+        if (to == address(0)) revert InvalidAddress();
         uint256 tokenId = _nextTokenId++;
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
@@ -187,15 +157,16 @@ contract NFTMarketplace is
         return tokenId;
     }
 
+    // ================ MARKETPLACE FUNCTIONS ================
     /**
      * @dev Allows the owner to list an NFT for sale
      * @param tokenId The ID of the NFT to list
      * @param price The price in wei
      */
     function listNFT(uint256 tokenId, uint256 price) public nonReentrant {
-        require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
-        require(price > 0, "Price should be greater than 0");
-        require(!_listings[tokenId].isActive, "NFT is already listed");
+        if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
+        if (price == 0) revert InvalidPrice();
+        if (_listings[tokenId].isActive) revert AlreadyListed();
 
         _listings[tokenId] = Listing({
             seller: msg.sender,
@@ -216,9 +187,9 @@ contract NFTMarketplace is
      * @param newPrice The new price in wei
      */
     function updateListingPrice(uint256 tokenId, uint256 newPrice) public {
-        require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
-        require(_listings[tokenId].isActive, "NFT is not listed");
-        require(newPrice > 0, "Price should be greater than 0");
+        if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
+        if (!_listings[tokenId].isActive) revert NotListed();
+        if (newPrice == 0) revert InvalidPrice();
 
         _listings[tokenId].price = newPrice;
         emit NFTListingUpdated(tokenId, msg.sender, newPrice);
@@ -229,8 +200,8 @@ contract NFTMarketplace is
      * @param tokenId The ID of the NFT to cancel
      */
     function cancelListing(uint256 tokenId) public {
-        require(ownerOf(tokenId) == msg.sender, "Not the owner of the NFT");
-        require(_listings[tokenId].isActive, "NFT is not listed");
+        if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
+        if (!_listings[tokenId].isActive) revert NotListed();
 
         _listings[tokenId].isActive = false;
         _removeActiveListing(tokenId);
@@ -245,25 +216,20 @@ contract NFTMarketplace is
      */
     function buyNFT(uint256 tokenId) public payable nonReentrant {
         Listing memory listing = _listings[tokenId];
-        require(listing.isActive, "NFT is not listed for sale");
-        require(msg.value >= listing.price, "Insufficient funds");
-        require(
-            _ownerOf(tokenId) == listing.seller,
-            "NFT is no longer owned by the seller"
-        );
+        if (!listing.isActive) revert NotListed();
+        if (msg.value < listing.price) revert InsufficientFunds();
+        if (_ownerOf(tokenId) != listing.seller) revert NoLongerOwnedBySeller();
 
         _listings[tokenId].isActive = false;
         _removeActiveListing(tokenId);
 
         uint256 marketplaceFee = (listing.price * marketplaceFeePercentage) /
             10000;
-
         _accumulatedPlatformFees += marketplaceFee;
 
         RoyaltyInfo memory royalty = _royalties[tokenId];
         uint256 artistRoyalty = (listing.price *
             royalty.salesRoyaltyPercentage) / 10000;
-
         uint256 sellerProceeds = listing.price - marketplaceFee - artistRoyalty;
 
         _transfer(listing.seller, msg.sender, tokenId);
@@ -272,7 +238,6 @@ contract NFTMarketplace is
             _pendingRoyalties[royalty.artistAddress] += artistRoyalty;
         }
 
-        // Pay seller
         if (sellerProceeds > 0) {
             _pendingRoyalties[listing.seller] += sellerProceeds;
         }
@@ -285,6 +250,7 @@ contract NFTMarketplace is
         emit NFTSold(tokenId, listing.seller, msg.sender, listing.price);
     }
 
+    // ================ ROYALTY FUNCTIONS ================
     /**
      * @dev Records a listen event but accumulates royalties for monthly distribution
      * @param tokenId The ID of the NFT
@@ -292,16 +258,14 @@ contract NFTMarketplace is
     function recordListen(uint256 tokenId) public payable nonReentrant {
         RoyaltyInfo memory royalty = _royalties[tokenId];
         address currentOwner = ownerOf(tokenId);
-        require(msg.value > 0, "Payment required for listening");
+        if (msg.value == 0) revert InsufficientFunds();
 
         // Calculate owner's share for listening
         uint256 ownerShare = (msg.value * royalty.ownerListenPercentage) /
             10000;
-
-        // Remaining goes to the artist
         uint256 artistShare = msg.value - ownerShare;
 
-        // Accumulate royalties instead of immediately transferring
+        // Accumulate royalties
         if (ownerShare > 0 && currentOwner != address(0)) {
             _pendingRoyalties[currentOwner] += ownerShare;
         }
@@ -328,34 +292,30 @@ contract NFTMarketplace is
         uint256[] calldata tokenIds,
         uint256[] calldata amounts
     ) public payable nonReentrant {
-        require(tokenIds.length > 0, "Empty token array");
-        require(tokenIds.length == amounts.length, "Array length mismatch");
+        if (tokenIds.length == 0) revert EmptyTokenArray();
+        if (tokenIds.length != amounts.length) revert ArrayLengthMismatch();
 
         uint256 totalAmount = 0;
         for (uint256 i = 0; i < amounts.length; i++) {
             totalAmount += amounts[i];
         }
-        require(
-            msg.value >= totalAmount,
-            "Insufficient payment for batch listens"
-        );
+        if (msg.value < totalAmount) revert InsufficientBatchPayment();
 
         for (uint256 i = 0; i < tokenIds.length; i++) {
             uint256 tokenId = tokenIds[i];
             uint256 amount = amounts[i];
 
-            require(amount > 0, "Payment required for listening");
+            if (amount == 0) revert InsufficientFunds();
+
             RoyaltyInfo memory royalty = _royalties[tokenId];
             address currentOwner = ownerOf(tokenId);
 
             // Calculate owner's share for listening
             uint256 ownerShare = (amount * royalty.ownerListenPercentage) /
                 10000;
-
-            // Remaining goes to the artist
             uint256 artistShare = amount - ownerShare;
 
-            // Accumulate royalties instead of immediately transferring
+            // Accumulate royalties
             if (ownerShare > 0 && currentOwner != address(0)) {
                 _pendingRoyalties[currentOwner] += ownerShare;
             }
@@ -379,6 +339,55 @@ contract NFTMarketplace is
         }
     }
 
+    /**
+     * @dev Allows users to withdraw their accumulated royalties
+     */
+    function withdrawRoyalties() public nonReentrant {
+        uint256 amount = _pendingRoyalties[msg.sender];
+        if (amount == 0) revert NoRoyaltiesToWithdraw();
+
+        _pendingRoyalties[msg.sender] = 0;
+        payable(msg.sender).transfer(amount);
+
+        emit RoyaltyWithdrawn(msg.sender, amount);
+    }
+
+    // ================ FEE MANAGEMENT FUNCTIONS ================
+    /**
+     * @dev Owner can adjust the marketplace fee
+     * @param newMarketplaceFee The new fee percentage in basis points (1/10000)
+     */
+    function setMarketplaceFee(uint256 newMarketplaceFee) public onlyOwner {
+        if (newMarketplaceFee >= 1000) revert FeeTooHigh();
+        uint256 oldFee = marketplaceFeePercentage;
+        marketplaceFeePercentage = newMarketplaceFee;
+        emit MarketplaceFeeUpdated(oldFee, newMarketplaceFee);
+    }
+
+    /**
+     * @dev Owner can adjust the mint fee
+     * @param newMintFee New fee amount in wei
+     */
+    function setMintFee(uint256 newMintFee) public onlyOwner {
+        uint256 oldFee = mintFee;
+        mintFee = newMintFee;
+        emit MintFeeUpdated(oldFee, newMintFee);
+    }
+
+    /**
+     * @dev Owner can withdraw accumulated fees
+     */
+    function withdrawFees() public onlyOwner {
+        uint256 amount = _accumulatedPlatformFees;
+        if (amount == 0) revert NoFeesToWithdraw();
+
+        _accumulatedPlatformFees = 0;
+        payable(owner()).transfer(amount);
+
+        emit FeesWithdrawn(owner(), amount);
+    }
+
+    // ================ QUERY FUNCTIONS ================
     /**
      * @dev Fetches the details of an NFT listing
      * @param tokenId The ID of the NFT
@@ -437,9 +446,9 @@ contract NFTMarketplace is
     }
 
     /**
-     * @dev Fetches all NFTs owned by an address
-     * @param seller The address of the owner
-     * @return tokenIds The IDs of the NFTs owned by the address
+     * @dev Fetches all NFTs listed by a specific seller
+     * @param seller The address of the seller
+     * @return tokenIds The IDs of the NFTs listed by the seller
      * @return prices The prices of the NFTs
      */
     function getListingsBySeller(
@@ -478,9 +487,7 @@ contract NFTMarketplace is
         address owner
     ) public view returns (uint256[] memory) {
         uint256 count = balanceOf(owner);
-
         uint256[] memory tokenIds = new uint256[](count);
-
         uint256 resultIndex = 0;
 
         for (uint256 i = 0; i < _nextTokenId && resultIndex < count; i++) {
@@ -514,60 +521,7 @@ contract NFTMarketplace is
         return getNFTsByOwner(msg.sender);
     }
 
-    /**
-     * @dev Owner can adjust the marketplace fee
-     * @param newMarketplaceFee The new fee percentage in basis points (1/10000)
-     */
-    function setMarketplaceFee(uint256 newMarketplaceFee) public onlyOwner {
-        require(newMarketplaceFee < 1000, "Fee should be less than 10%");
-        uint256 oldFee = marketplaceFeePercentage;
-        marketplaceFeePercentage = newMarketplaceFee;
-        emit MarketplaceFeeUpdated(oldFee, newMarketplaceFee);
-    }
-
-    /**
-     * @dev Allows anyone to see the current marketplace fee
-     * @return marketplaceFeePercentage The current marketplace fee
-     */
-    function getMarketplaceFee() public view returns (uint256) {
-        return marketplaceFeePercentage;
-    }
-
-    /**
-     * @dev Owner can adjust the mint fee
-     * @param newMintFee New fee amount in wei
-     */
-    function setMintFee(uint256 newMintFee) public onlyOwner {
-        uint256 oldFee = mintFee;
-        mintFee = newMintFee;
-        emit MintFeeUpdated(oldFee, newMintFee);
-    }
-
-    /**
-     * @dev Owner can withdraw accumulated fees
-     */
-    function withdrawFees() public onlyOwner {
-        uint256 amount = _accumulatedPlatformFees;
-        require(amount > 0, "No fees to withdraw");
-
-        // Reset the accumulated fees
-        _accumulatedPlatformFees = 0;
-
-        payable(owner()).transfer(amount);
-
-        emit FeesWithdrawn(owner(), amount);
-    }
-
-    function withdrawRoyalties() public nonReentrant {
-        uint256 amount = _pendingRoyalties[msg.sender];
-        require(amount > 0, "No royalties to withdraw");
-
-        _pendingRoyalties[msg.sender] = 0;
-        payable(msg.sender).transfer(amount);
-
-        emit RoyaltyWithdrawn(msg.sender, amount);
-    }
-
+    // ================ ROYALTY INTERFACE IMPLEMENTATION ================
     function royaltyInfo(
         uint256 tokenId,
         uint256 salePrice
@@ -577,17 +531,82 @@ contract NFTMarketplace is
         return (royalty.artistAddress, royaltyAmount);
     }
 
-    // Add getter for platform fees
+    // ================ HELPER FUNCTIONS ================
+    /**
+     * @dev Sets the royalty information for a specific token
+     * @param tokenId The ID of the token
+     * @param artistAddress The address to receive royalties
+     * @param salesRoyaltyPercentage The percentage of royalties (in basis points)
+     * @param ownerListenPercentage The percentage of royalties for listening (in basis points)
+     */
+    function _setTokenRoyalty(
+        uint256 tokenId,
+        address artistAddress,
+        uint256 salesRoyaltyPercentage,
+        uint256 ownerListenPercentage
+    ) internal {
+        _royalties[tokenId] = RoyaltyInfo({
+            artistAddress: artistAddress,
+            salesRoyaltyPercentage: salesRoyaltyPercentage,
+            ownerListenPercentage: ownerListenPercentage
+        });
+    }
+
+    /**
+     * @dev Removes listing from the active listings
+     * @param tokenId The ID of the token
+     */
+    function _removeActiveListing(uint256 tokenId) private {
+        uint256 lastListingIndex = _activeListingIds.length - 1;
+        uint256 listingIndex = _activeListingIndex[tokenId];
+
+        if (listingIndex != lastListingIndex) {
+            uint256 lastTokenId = _activeListingIds[lastListingIndex];
+            _activeListingIndex[lastTokenId] = listingIndex;
+            _activeListingIds[listingIndex] = lastTokenId;
+        }
+
+        _activeListingIds.pop();
+        delete _activeListingIndex[tokenId];
+    }
+
+    // ================ FINANCIAL INFO FUNCTIONS ================
+    /**
+     * @dev Allows anyone to see the current marketplace fee
+     * @return The current marketplace fee percentage
+     */
+    function getMarketplaceFee() public view returns (uint256) {
+        return marketplaceFeePercentage;
+    }
+
+    /**
+     * @dev Returns the accumulated platform fees available for withdrawal
+     * @return The amount of platform fees
+     */
     function getAccumulatedPlatformFees() external view returns (uint256) {
         return _accumulatedPlatformFees;
     }
 
-    // Update getTotalPendingRoyalties to exclude platform fees
+    /**
+     * @dev Returns the total pending royalties (excluding platform fees)
+     * @return The total amount of pending royalties
+     */
     function getTotalPendingRoyalties() external view returns (uint256) {
         return address(this).balance - _accumulatedPlatformFees;
     }
 
-    // The following functions are overrides required by Solidity.
+    /**
+     * @dev Returns pending royalties for a specific address
+     * @param recipient The address to check
+     * @return The amount of pending royalties
+     */
+    function getPendingRoyaltiesForAddress(
+        address recipient
+    ) external view returns (uint256) {
+        return _pendingRoyalties[recipient];
+    }
+
+    // ================ OVERRIDE FUNCTIONS ================
     function tokenURI(
         uint256 tokenId
     ) public view override(ERC721, ERC721URIStorage) returns (string memory) {
