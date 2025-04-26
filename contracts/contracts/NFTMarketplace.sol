@@ -102,28 +102,25 @@ contract NFTMarketplace is
     /**
      * @dev Allows anyone to mint an NFT by paying a mint fee
      * @param uri Metadata URI for the NFT
-     * @param artistAddress Address to receive royalties
      * @param salesRoyaltyPercentage Percentage of royalties (in basis points)
      * @param ownerListenPercentage Percentage of royalties for listening (in basis points)
      * @return tokenId The ID of the newly minted NFT
      */
     function mint(
         string memory uri,
-        address artistAddress,
         uint256 salesRoyaltyPercentage,
         uint256 ownerListenPercentage
     ) public payable nonReentrant returns (uint256) {
         if (msg.value < mintFee) revert InsufficientMintFee();
-        if (salesRoyaltyPercentage > 1000) revert RoyaltyTooHigh();
+        if (salesRoyaltyPercentage > 10000) revert RoyaltyTooHigh();
         if (ownerListenPercentage > 5000) revert RoyaltyTooHigh();
-        if (artistAddress == address(0)) revert InvalidAddress();
 
         uint256 tokenId = _nextTokenId++;
         _safeMint(msg.sender, tokenId);
         _setTokenURI(tokenId, uri);
         _setTokenRoyalty(
             tokenId,
-            artistAddress,
+            msg.sender,
             salesRoyaltyPercentage,
             ownerListenPercentage
         );
@@ -136,24 +133,6 @@ contract NFTMarketplace is
         }
 
         emit NFTMinted(tokenId, msg.sender, uri);
-        return tokenId;
-    }
-
-    /**
-     * @dev Owner can mint NFTs without paying a fee (for special cases)
-     * @param to Recipient of the NFT
-     * @param uri Metadata URI for the NFT
-     * @return tokenId The ID of the newly minted NFT
-     */
-    function ownerMint(
-        address to,
-        string memory uri
-    ) public onlyOwner returns (uint256) {
-        if (to == address(0)) revert InvalidAddress();
-        uint256 tokenId = _nextTokenId++;
-        _safeMint(to, tokenId);
-        _setTokenURI(tokenId, uri);
-        emit NFTMinted(tokenId, to, uri);
         return tokenId;
     }
 
@@ -389,20 +368,6 @@ contract NFTMarketplace is
 
     // ================ QUERY FUNCTIONS ================
     /**
-     * @dev Fetches the details of an NFT listing
-     * @param tokenId The ID of the NFT
-     * @return seller The address of the seller
-     * @return price The price of the NFT
-     * @return isActive Whether the listing is active
-     */
-    function getListing(
-        uint256 tokenId
-    ) public view returns (address seller, uint256 price, bool isActive) {
-        Listing memory listing = _listings[tokenId];
-        return (listing.seller, listing.price, listing.isActive);
-    }
-
-    /**
      * @dev Fetches all active listings (paginated)
      * @param skip The number of listings to skip
      * @param take The number of listings to fetch
@@ -481,23 +446,26 @@ contract NFTMarketplace is
     /**
      * @dev Fetches all NFTs owned by an address
      * @param owner The address of the owner
-     * @return Array of token IDs owned by the address
+     * @return tokenIds Array of token IDs owned by the address
+     * @return isListed Array of booleans indicating if each token is listed
      */
     function getNFTsByOwner(
         address owner
-    ) public view returns (uint256[] memory) {
+    ) public view returns (uint256[] memory tokenIds, bool[] memory isListed) {
         uint256 count = balanceOf(owner);
-        uint256[] memory tokenIds = new uint256[](count);
+        tokenIds = new uint256[](count);
+        isListed = new bool[](count);
         uint256 resultIndex = 0;
 
         for (uint256 i = 0; i < _nextTokenId && resultIndex < count; i++) {
             if (_ownerOf(i) == owner) {
                 tokenIds[resultIndex] = i;
+                isListed[resultIndex] = _listings[i].isActive;
                 resultIndex++;
             }
         }
 
-        return tokenIds;
+        return (tokenIds, isListed);
     }
 
     /**
@@ -515,9 +483,14 @@ contract NFTMarketplace is
 
     /**
      * @dev Fetches sender's NFTs
-     * @return Array of token IDs owned by the sender
+     * @return tokenIds Array of token IDs owned by the address
+     * @return isListed Array of booleans indicating if each token is listed
      */
-    function getMyNFTs() public view returns (uint256[] memory) {
+    function getMyNFTs()
+        public
+        view
+        returns (uint256[] memory tokenIds, bool[] memory isListed)
+    {
         return getNFTsByOwner(msg.sender);
     }
 
