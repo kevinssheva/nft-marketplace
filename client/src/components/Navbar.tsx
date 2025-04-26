@@ -31,6 +31,12 @@ const Navbar = () => {
               Home
             </Link>
             <Link
+              href="/listings"
+              className="text-text hover:text-primary font-medium"
+            >
+              Explore
+            </Link>
+            <Link
               href="/mint"
               className="text-text hover:text-primary font-medium"
             >
@@ -73,6 +79,12 @@ const Navbar = () => {
                 className="text-text hover:text-primary font-medium"
               >
                 Home
+              </Link>
+              <Link
+                href="/listings"
+                className="text-text hover:text-primary font-medium"
+              >
+                Explore
               </Link>
               <Link
                 href="/mint"
