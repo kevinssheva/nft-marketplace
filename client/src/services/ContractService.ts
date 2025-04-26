@@ -135,7 +135,7 @@ export class ContractService {
     const mintFeeWei = ethers.parseEther(mintFeeEth);
 
     const tx = await this.contract.mint(
-      metadata, 
+      metadata,
       salesRoyaltyPercentage,
       ownerListenPercentage,
       {
@@ -159,10 +159,12 @@ export class ContractService {
       throw new Error('Contract or signer not initialized');
 
     try {
-      const tokenIds = await this.contract.getMyNFTs();
+      // Call contract's getMyNFTs function which returns [tokenIds, isListed]
+      const [tokenIds, isListedArray] = await this.contract.getMyNFTs();
 
       const nfts = await Promise.all(
-        tokenIds.map(async (tokenId: bigint) => {
+        tokenIds.map(async (tokenId: bigint, index: number) => {
+          // Get token URI and metadata
           const tokenURI = await this.contract!.tokenURI(tokenId);
           let metadata: NFTMetadataType = {
             name: `NFT #${tokenId.toString()}`,
@@ -170,15 +172,42 @@ export class ContractService {
             image: '',
           };
 
-          const [seller, price, isListed] = await this.contract!.getListing(
-            tokenId
-          );
+          // Get if the token is listed and its price if it is
+          const isListed = isListedArray[index];
+          let price = '0';
+          let seller = '';
 
+          // Only fetch price if the NFT is listed
+          if (isListed) {
+            try {
+              // For active listings, we need to query the listings mapping
+              // through the active listings array
+              const [activeSellers, activePrices] =
+                await this.contract!.getListingsBySeller(
+                  await this.signer!.getAddress()
+                );
+
+              // Find this token's price in the active listings
+              const listingIndex = activeSellers.findIndex(
+                (id: bigint) => id.toString() === tokenId.toString()
+              );
+
+              if (listingIndex >= 0) {
+                price = ethers.formatEther(activePrices[listingIndex]);
+                seller = await this.signer!.getAddress();
+              }
+            } catch (err) {
+              console.error(
+                `Error fetching listing for token #${tokenId}`,
+                err
+              );
+            }
+          }
+
+          // Fetch and parse metadata
           try {
             const metadataUrl = this.ipfsService.getGatewayUrl(tokenURI);
-            // console.log('Fetching metadata from:', metadataUrl);
             const response = await fetch(metadataUrl);
-
             metadata = await response.json();
 
             if (metadata.image && metadata.image.startsWith('ipfs://')) {
@@ -191,17 +220,19 @@ export class ContractService {
             );
           }
 
+          // Return formatted NFT object
           return {
             id: tokenId.toString(),
             name: metadata.name,
             description: metadata.description,
             image: metadata.image,
-            price: isListed ? ethers.formatEther(price) : '0',
+            price: price,
             creator: {
-              address: seller,
+              address: seller || (await this.signer!.getAddress()),
               name: null,
             },
-            isListed,
+            isOwned: true, // These are definitely owned by the user
+            isListed: isListed,
           };
         })
       );
