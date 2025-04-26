@@ -172,6 +172,10 @@ export default function ProfilePage() {
                         }}
                         isOwned={true}
                         isListed={true}
+                        onListClick={(id) => {
+                          setSelectedNFT(id);
+                          // For listed NFTs, we would handle canceling or updating the listing
+                        }}
                       />
                     ))}
                 </div>
@@ -194,79 +198,94 @@ export default function ProfilePage() {
                   {ownedNFTs
                     .filter((nft) => !nft.isListed)
                     .map((nft) => (
-                      <div
+                      <NFTCard
                         key={nft.id}
-                        className="bg-surface rounded-xl overflow-hidden border border-white/10 shadow-sm hover:shadow-md transition-shadow"
-                      >
-                        <div className="aspect-square overflow-hidden relative">
-                          <Image
-                            src={nft.image || '/placeholder-nft.png'}
-                            alt={nft.name}
-                            fill
-                            className="object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = '/placeholder-nft.png';
-                            }}
-                          />
-                        </div>
-                        <div className="p-4 space-y-3">
-                          <h3 className="font-medium text-lg truncate text-text">
-                            {nft.name}
-                          </h3>
-
-                          {selectedNFT === nft.id ? (
-                            <div className="space-y-3">
-                              <div className="flex items-center">
-                                <div className="flex-1 flex items-center bg-background border border-white/20 rounded-lg overflow-hidden">
-                                  <input
-                                    type="number"
-                                    step="0.001"
-                                    min="0.001"
-                                    placeholder="Price in ETH"
-                                    value={listingPrice}
-                                    onChange={(e) =>
-                                      setListingPrice(e.target.value)
-                                    }
-                                    className="flex-1 p-2 bg-transparent focus:outline-none text-text px-3"
-                                  />
-                                  <div className="px-3 py-2 text-text/70 flex items-center">
-                                    <FaEthereum className="mr-1" />
-                                    ETH
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => handleListNFT(nft.id)}
-                                  disabled={isListing || !listingPrice}
-                                  className="flex-1 bg-primary hover:bg-primary/90 text-white font-medium p-2 rounded-lg disabled:opacity-50 transition-colors"
-                                >
-                                  {isListing ? 'Listing...' : 'List for Sale'}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setSelectedNFT(null);
-                                    setListingPrice('');
-                                  }}
-                                  className="px-3 py-2 bg-background hover:bg-surface border border-white/20 rounded-lg transition-colors"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setSelectedNFT(nft.id)}
-                              className="w-full bg-primary hover:bg-primary/90 text-white font-medium p-2 rounded-lg transition-colors"
-                            >
-                              List for Sale
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                        id={nft.id}
+                        name={nft.name}
+                        image={nft.image || '/placeholder-nft.png'}
+                        price={nft.price}
+                        creator={{
+                          address: nft.creator?.address || address || '',
+                          name: 'You',
+                        }}
+                        isOwned={true}
+                        isListed={false}
+                        onListClick={(id) => {
+                          setSelectedNFT(id);
+                          // Show price input for unlisted NFTs
+                          setTimeout(() => {
+                            const priceInput = document.getElementById(
+                              `price-input-${id}`
+                            );
+                            if (priceInput) {
+                              priceInput.focus();
+                            }
+                          }, 100);
+                        }}
+                      />
                     ))}
                 </div>
+
+                {/* Listing Dialog Modal */}
+                {selectedNFT &&
+                  !ownedNFTs.find((nft) => nft.id === selectedNFT)
+                    ?.isListed && (
+                    <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/70">
+                      <div className="bg-surface p-6 rounded-xl max-w-md w-full border border-white/10 shadow-xl">
+                        <h3 className="text-xl font-semibold mb-4 text-text">
+                          List NFT for Sale
+                        </h3>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-text/70 mb-2">
+                              Set Price (ETH)
+                            </label>
+                            <div className="flex items-center bg-background border border-white/20 rounded-lg overflow-hidden">
+                              <input
+                                id={`price-input-${selectedNFT}`}
+                                type="number"
+                                step="0.001"
+                                min="0.001"
+                                placeholder="Price in ETH"
+                                value={listingPrice}
+                                onChange={(e) =>
+                                  setListingPrice(e.target.value)
+                                }
+                                className="flex-1 p-3 bg-transparent focus:outline-none text-text px-3"
+                              />
+                              <div className="px-3 py-2 text-text/70 flex items-center">
+                                <FaEthereum className="mr-1" />
+                                ETH
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-3 mt-6">
+                            <button
+                              onClick={() => handleListNFT(selectedNFT)}
+                              disabled={
+                                isListing ||
+                                !listingPrice ||
+                                parseFloat(listingPrice) <= 0
+                              }
+                              className="flex-1 bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-lg disabled:opacity-50 transition-colors"
+                            >
+                              {isListing ? 'Processing...' : 'Confirm Listing'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedNFT(null);
+                                setListingPrice('');
+                              }}
+                              className="px-4 py-3 bg-background hover:bg-surface border border-white/20 rounded-lg transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
               </div>
             )}
           </div>

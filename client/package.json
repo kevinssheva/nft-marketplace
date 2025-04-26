@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "ethers": "^6.13.5",
+    "framer-motion": "^12.9.2",
     "next": "15.2.3",
     "pinata": "^2.1.0",
     "react": "^19.0.0",
