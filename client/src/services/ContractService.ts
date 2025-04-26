@@ -125,16 +125,23 @@ export class ContractService {
 
   async mintNFT(
     metadata: string,
-    mintFeeEth: string
+    mintFeeEth: string,
+    salesRoyaltyPercentage: number,
+    ownerListenPercentage: number
   ): Promise<{ tokenId: string; txHash: string }> {
     if (!this.contract || !this.signer)
       throw new Error('Contract or signer not initialized');
 
     const mintFeeWei = ethers.parseEther(mintFeeEth);
 
-    const tx = await this.contract.mint(metadata, {
-      value: mintFeeWei,
-    });
+    const tx = await this.contract.mint(
+      metadata, 
+      salesRoyaltyPercentage,
+      ownerListenPercentage,
+      {
+        value: mintFeeWei,
+      }
+    );
 
     const receipt = await tx.wait();
 

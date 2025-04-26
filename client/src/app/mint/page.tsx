@@ -6,7 +6,7 @@ import { useWallet } from '@/context/WalletContext';
 import { useContractData } from '@/hooks/useContractData';
 import Image from 'next/image';
 import { IoMdClose } from 'react-icons/io';
-import { IoImageOutline } from 'react-icons/io5';
+import { IoImageOutline, IoInformationCircleOutline } from 'react-icons/io5';
 import { useIPFS } from '@/hooks/useIPFS';
 
 export default function MintNFT() {
@@ -27,7 +27,14 @@ export default function MintNFT() {
   const [mintStatus, setMintStatus] = useState<
     'idle' | 'uploading' | 'minting' | 'success' | 'error'
   >('idle');
-  const mintFee = '0.1'; // Mint fee in ETH
+
+  // Read mint fee from the contract (hardcoded for now - would ideally fetch from contract)
+  const mintFee = '0.01';
+
+  // Royalty settings
+  const [salesRoyaltyPercentage, setSalesRoyaltyPercentage] = useState(500); // 5% default (500 basis points)
+  const [ownerListenPercentage, setOwnerListenPercentage] = useState(2000); // 20% default (2000 basis points)
+
   const [mintTxHash, setMintTxHash] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -66,7 +73,7 @@ export default function MintNFT() {
     }
 
     if (!file || !name || !description) {
-      alert('Please fill all fields');
+      alert('Please fill all required fields');
       return;
     }
 
@@ -98,8 +105,13 @@ export default function MintNFT() {
 
       setMintStatus('minting');
 
-      // Call the mintNFT function from your hook with the IPFS metadata URI
-      const result = await mintNFT(metadataUri, mintFee);
+      // Call the mintNFT function with metadata URI and royalty parameters
+      const result = await mintNFT(
+        metadataUri,
+        mintFee,
+        salesRoyaltyPercentage,
+        ownerListenPercentage
+      );
 
       if (result && result.success) {
         setMintStatus('success');
@@ -206,6 +218,81 @@ export default function MintNFT() {
                 className="w-full px-4 py-2 bg-background border border-primary/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 required
               />
+            </div>
+
+            {/* Royalty Settings */}
+            <div className="space-y-4 p-4 bg-surface/30 border border-white/10 rounded-lg">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-medium text-text">
+                  Royalty Settings
+                </h3>
+                <div className="group relative flex items-center">
+                  <IoInformationCircleOutline className="text-text/70 w-5 h-5" />
+                  <div className="hidden group-hover:block absolute right-0 bottom-full mb-2 w-64 p-2 bg-surface border border-white/10 rounded-lg text-xs text-text/70">
+                    Sales royalties are paid when your NFT is resold. Listen
+                    royalties are paid when your music NFT is played.
+                  </div>
+                </div>
+              </div>
+
+              {/* Sales Royalty Percentage */}
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label
+                    htmlFor="salesRoyalty"
+                    className="block text-sm font-medium text-text"
+                  >
+                    Sales Royalty ({(salesRoyaltyPercentage / 100).toFixed(1)}%)
+                  </label>
+                  <span className="text-xs text-text/70">(Max: 10%)</span>
+                </div>
+                <input
+                  type="range"
+                  id="salesRoyalty"
+                  min="0"
+                  max="1000"
+                  step="50"
+                  value={salesRoyaltyPercentage}
+                  onChange={(e) =>
+                    setSalesRoyaltyPercentage(parseInt(e.target.value))
+                  }
+                  className="w-full h-2 bg-background rounded-lg appearance-none cursor-pointer accent-primary"
+                />
+                <div className="flex justify-between text-xs text-text/70">
+                  <span>0%</span>
+                  <span>10%</span>
+                </div>
+              </div>
+
+              {/* Listen Royalty Percentage */}
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label
+                    htmlFor="listenRoyalty"
+                    className="block text-sm font-medium text-text"
+                  >
+                    Listen-to-Earn Share (
+                    {(ownerListenPercentage / 100).toFixed(1)}%)
+                  </label>
+                  <span className="text-xs text-text/70">(Max: 50%)</span>
+                </div>
+                <input
+                  type="range"
+                  id="listenRoyalty"
+                  min="0"
+                  max="5000"
+                  step="100"
+                  value={ownerListenPercentage}
+                  onChange={(e) =>
+                    setOwnerListenPercentage(parseInt(e.target.value))
+                  }
+                  className="w-full h-2 bg-background rounded-lg appearance-none cursor-pointer accent-primary"
+                />
+                <div className="flex justify-between text-xs text-text/70">
+                  <span>0%</span>
+                  <span>50%</span>
+                </div>
+              </div>
             </div>
 
             {/* Mint Fee Info */}

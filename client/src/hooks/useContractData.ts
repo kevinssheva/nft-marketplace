@@ -73,7 +73,12 @@ export function useContractData() {
   );
 
   const mintNFT = useCallback(
-    async (metadataUri: string, mintFee: string) => {
+    async (
+      metadataUri: string, 
+      mintFee: string, 
+      salesRoyaltyPercentage: number, 
+      ownerListenPercentage: number
+    ) => {
       if (!contractService) {
         setError('Wallet not connected');
         return { success: false };
@@ -83,7 +88,13 @@ export function useContractData() {
       setError(null);
 
       try {
-        const result = await contractService.mintNFT(metadataUri, mintFee);
+        const result = await contractService.mintNFT(
+          metadataUri, 
+          mintFee, 
+          salesRoyaltyPercentage, 
+          ownerListenPercentage
+        );
+        
         // Refresh listings after minting
         await fetchListings();
 
